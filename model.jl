@@ -1,8 +1,11 @@
 using PyPlot
 
 type ModelParams
-    l_A
-    l_B
+    l_A::Float64
+    l_B::Float64
+    m::Float64
+    I_z::Float64
+    v_steer::Float64
 end
 
 function pacejka(a)
@@ -38,7 +41,7 @@ function simModel(z::Array{Float64},u::Array{Float64},dt::Float64,modelParams::M
     return zNext
 end
 function simDynModel_exact(z::Array{Float64},u::Array{Float64},dt::Float64,modelParams::ModelParams)
-    dtn = dt/1000
+    dtn = dt/10
     t = 0:dtn:dt
     z_final = z
     ang = zeros(2)
@@ -52,13 +55,14 @@ function simDynModel(z::Array{Float64},u::Array{Float64},dt::Float64,modelParams
     zNext::Array{Float64}
     L_f = modelParams.l_A
     L_r = modelParams.l_B
-    m   = 1.98
-    I_z = 0.24
+    m   = modelParams.m
+    I_z = modelParams.I_z
+    v_steer = modelParams.v_steer        # 0.5 rad / 0.2 seconds
 
     a_F = 0
     a_R = 0
-    if z[3] != 0
-        a_F     = atan((z[4] + L_f*z[6])/z[3]) - u[2]
+    if abs(z[3]) >= 0.2
+        a_F     = atan((z[4] + L_f*z[6])/z[3]) - z[7]
         a_R     = atan((z[4] - L_r*z[6])/z[3])
     end
 
@@ -73,66 +77,20 @@ function simDynModel(z::Array{Float64},u::Array{Float64},dt::Float64,modelParams
     zNext[1]        = zNext[1]       + dt * (cos(z[5])*z[3] - sin(z[5])*z[4])
     zNext[2]        = zNext[2]       + dt * (sin(z[5])*z[3] + cos(z[5])*z[4])
     zNext[3]        = zNext[3]       + dt * (u[1] + z[4]*z[6] - 0.63*z[3]^2*sign(z[3]))
-    zNext[4]        = zNext[4]       + dt * (2/m*(FyF*cos(u[2]) + FyR) - z[6]*z[3])
+    zNext[4]        = zNext[4]       + dt * (2/m*(FyF*cos(z[7]) + FyR) - z[6]*z[3])
     zNext[5]        = zNext[5]       + dt * (z[6])
     zNext[6]        = zNext[6]       + dt * (2/I_z*(L_f*FyF - L_r*FyR))
+    zNext[7]        = zNext[7]       + dt * v_steer * sign(u[2]-z[7])
 
     return zNext, [a_F a_R]
 end
-
-function simDynModel_ODE(t::Float64,z::Array{Float64},u::Array{Float64},modelParams::ModelParams)
-
-    zNext::Array{Float64}
-    L_f = modelParams.l_A
-    L_r = modelParams.l_B
-    m   = 1.98
-    I_z = 0.24
-
-    a_F = 0
-    a_R = 0
-    if z[3] != 0
-        a_F     = atan((z[4] + L_f*z[6])/z[3]) - u[2]
-        a_R     = atan((z[4] - L_r*z[6])/z[3])
-    end
-    println("a_F = $a_F, a_R = $a_R")
-
-    C_alpha_f = 10
-    C_alpha_r = 10
-
-    #C_alpha_f = pacejka(a_F)
-    #C_alpha_r = pacejka(a_R)
-
-    println(C_alpha_f)
-
-    FyF = -C_alpha_f * a_F
-    FyR = -C_alpha_r * a_R
-
-
-    zNext = z
-    # compute next state
-    zNext[1]        = (cos(z[5])*z[3] - sin(z[5])*z[4])
-    zNext[2]        = (sin(z[5])*z[3] + cos(z[5])*z[4])
-    zNext[3]        = (u[1] + z[4]*z[6])
-    zNext[4]        = (1/m*(FyF*cos(u[2]) + FyR) - z[6]*z[3])
-    zNext[5]        = (z[6])
-    zNext[6]        = (1/I_z*(L_f*FyF - L_r*FyR))
-
-    #zNext = zNext + 0*randn(1,4)*0.001
-    return zNext, [a_F a_R]
-end
-
-# modelParams = ModelParams(0.125,0.125)
-# z0 = zeros(6)
-# u = zeros(2)
-# t,z = ode45((t,z)->simDynModel_ODE(t,z,u,modelParams),z0,1)
-
 
 function startSim()
-    modelParams = ModelParams(0.125,0.125)
+    modelParams = ModelParams(0.125,0.125,1.98,0.24,0.5/0.2)
 
     dt      = 0.01
-    t       = 0:dt:3
-    z       = zeros(size(t,1),6)
+    t       = 0:dt:30
+    z       = zeros(size(t,1),7)
     z_kin   = zeros(size(t,1),6)
     #z_ode   = zeros(size(t,1),6)
     u       = zeros(size(t,1),2)
@@ -144,8 +102,11 @@ function startSim()
         if t[i] < 1
             u[i,1] = 1
         elseif t[i] < 2
-            u[i,1] = 0.0
+            u[i,1] = 0.5
             u[i,2] = 0.5
+        elseif t[i] < 3
+            u[i,1] = 1.0
+            u[i,2] = -0.5
         #elseif t[i] < 4
             #u[i,1] = 1
             #u[i,2] = 0.5
@@ -160,7 +121,7 @@ function startSim()
 
     plot(t,z,t,z_kin,"--")
     grid()
-    legend(["x","y","v_x","v_y","psi","psi_dot","x","y","psi","v"])
+    legend(["x","y","v_x","v_y","psi","psi_dot","d_f","x","y","psi","v"])
     figure()
     plot(z[:,1],z[:,2],z_kin[:,1],z_kin[:,2])
     legend(["Dynamic","Kinematic"])
